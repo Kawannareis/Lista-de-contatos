@@ -6,25 +6,28 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSalvarContato = document.getElementById("salvarContato");
   const mensagemSucesso = document.getElementById("mensagemSucesso");
   const inputPesquisa = document.getElementById("pesquisarContato");
+  const lixeiraContatos = document.querySelector(".lixeiraContatos");
+  const btnVerLixeira = document.getElementById("verLixeira");
 
-  let indiceEditando = null; // variável global para controle da edição
+  let indiceEditando = null;
+  let contatosCache = [];
 
-  function carregarContatos() {
+  async function carregarContatos() {
+    const response = await fetch("/contatos");
+    const contatos = await response.json();
+    contatosCache = contatos;
     listaContatos.innerHTML = "";
-    const contatos = JSON.parse(localStorage.getItem("contatos")) || [];
 
     contatos.forEach((contato, index) => {
       const div = document.createElement("div");
       div.classList.add("contato");
-
       div.innerHTML = `
         <h1>Nome: ${contato.nome}</h1>
         <h2>Telefone: ${contato.telefone}</h2>
         <h3>Email: ${contato.email}</h3>
-        <button class="excluirContato" data-index="${index}">X</button>
+        <button class="excluirContato" data-id="${contato.id}">X</button>
         <button class="editarContato" data-index="${index}">Editar</button>
       `;
-
       listaContatos.appendChild(div);
     });
   }
@@ -38,7 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   btnCriarContato.addEventListener("click", () => {
     formContato.style.display = "block";
-    indiceEditando = null; // Reseta o índice ao criar novo
+    indiceEditando = null;
     document.getElementById("nome").value = "";
     document.getElementById("telefone").value = "";
     document.getElementById("email").value = "";
@@ -48,23 +51,28 @@ document.addEventListener("DOMContentLoaded", () => {
     formContato.style.display = "none";
   });
 
-  btnSalvarContato.addEventListener("click", () => {
+  btnSalvarContato.addEventListener("click", async () => {
     const nome = document.getElementById("nome").value;
     const telefone = document.getElementById("telefone").value;
     const email = document.getElementById("email").value;
 
     if (nome && telefone && email) {
-      const contatos = JSON.parse(localStorage.getItem("contatos")) || [];
+      const contato = { nome, telefone, email };
 
       if (indiceEditando !== null) {
-        // Atualizando contato existente
-        contatos[indiceEditando] = { nome, telefone, email };
+        const id = contatosCache[indiceEditando].id;
+        await fetch(`/contatos/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(contato),
+        });
       } else {
-        // Criando novo contato
-        contatos.push({ nome, telefone, email });
+        await fetch("/contatos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(contato),
+        });
       }
-
-      localStorage.setItem("contatos", JSON.stringify(contatos));
 
       formContato.style.display = "none";
       indiceEditando = null;
@@ -72,34 +80,30 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  document.addEventListener("click", (e) => {
+  document.addEventListener("click", async (e) => {
     if (e.target.classList.contains("excluirContato")) {
-      const index = e.target.getAttribute("data-index");
-      const contatos = JSON.parse(localStorage.getItem("contatos")) || [];
-      const contatoExcluido = contatos.splice(index, 1)[0];
-    
-      const lixeira = JSON.parse(localStorage.getItem("lixeira")) || [];
-      lixeira.push(contatoExcluido);
-    
-      localStorage.setItem("contatos", JSON.stringify(contatos));
-      localStorage.setItem("lixeira", JSON.stringify(lixeira));
-    
-      carregarContatos(); // Atualiza a lista após exclusão
-      mostrarMensagem();  // Mensagem de sucesso
+      const id = e.target.getAttribute("data-id");
+      await fetch(`/contatos/${id}`, { method: "DELETE" });
+      carregarContatos();
+      mostrarMensagem();
     }
-    
-      
 
     if (e.target.classList.contains("editarContato")) {
       indiceEditando = e.target.getAttribute("data-index");
-      const contatos = JSON.parse(localStorage.getItem("contatos")) || [];
-      const contato = contatos[indiceEditando];
+      const contato = contatosCache[indiceEditando];
 
       document.getElementById("nome").value = contato.nome;
       document.getElementById("telefone").value = contato.telefone;
       document.getElementById("email").value = contato.email;
 
       formContato.style.display = "block";
+    }
+
+    if (e.target.classList.contains("restaurarContato")) {
+      const id = e.target.getAttribute("data-id");
+      await fetch(`/lixeira/restaurar/${id}`, { method: "POST" });
+      btnVerLixeira.click(); // atualiza lixeira
+      carregarContatos();    // atualiza lista principal
     }
   });
 
@@ -120,53 +124,58 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  btnVerLixeira.addEventListener("click", async () => {
+    const response = await fetch("/lixeira");
+    const lixeira = await response.json();
+    lixeiraContatos.innerHTML = "";
+
+    if (lixeira.length === 0) {
+      lixeiraContatos.innerHTML = "<p>Nenhum contato na lixeira.</p>";
+    } else {
+      lixeira.forEach((contato) => {
+        const div = document.createElement("div");
+        div.classList.add("contato");
+
+        div.innerHTML = `
+          <h1>Nome: ${contato.nome}</h1>
+          <h2>Telefone: ${contato.telefone}</h2>
+          <h3>Email: ${contato.email}</h3>
+          <button class="restaurarContato" data-id="${contato.id}">Restaurar</button>
+        `;
+
+        lixeiraContatos.appendChild(div);
+      });
+    }
+
+    lixeiraContatos.style.display = "block";
+  });
+
   carregarContatos();
 });
 
-const btnVerLixeira = document.getElementById("btnVerLixeira");
-const lixeiraContatos = document.getElementById("lixeiraContatos");
 
-btnVerLixeira.addEventListener("click", () => {
-  const lixeira = JSON.parse(localStorage.getItem("lixeira")) || [];
-  lixeiraContatos.innerHTML = ""; // Limpa o conteúdo
+ // Efeito vagalumes (inalterado)
+ const numFireflies = 50;
+ for (let i = 0; i < numFireflies; i++) {
+   const firefly = document.createElement('div');
+   firefly.classList.add('firefly');
+   document.body.appendChild(firefly);
+   firefly.style.top = Math.random() * window.innerHeight + 'px';
+   firefly.style.left = Math.random() * window.innerWidth + 'px';
+   animateFirefly(firefly);
+ }
 
-  if (lixeira.length === 0) {
-    lixeiraContatos.innerHTML = "<p>Nenhum contato na lixeira.</p>";
-  } else {
-    lixeira.forEach((contato, index) => {
-      const div = document.createElement("div");
-      div.classList.add("contato");
-
-      div.innerHTML = `
-        <h1>Nome: ${contato.nome}</h1>
-        <h2>Telefone: ${contato.telefone}</h2>
-        <h3>Email: ${contato.email}</h3>
-        <button class="restaurarContato" data-index="${index}">Restaurar</button>
-      `;
-
-      lixeiraContatos.appendChild(div);
-    });
-  }
-
-  lixeiraContatos.style.display = "block"; // mostra a lixeira
-});
-
-// Restaurar contato da lixeira
-document.addEventListener("click", (e) => {
-  if (e.target.classList.contains("restaurarContato")) {
-    const index = e.target.getAttribute("data-index");
-    const lixeira = JSON.parse(localStorage.getItem("lixeira")) || [];
-    const contatoRestaurado = lixeira.splice(index, 1)[0];
-
-    const contatos = JSON.parse(localStorage.getItem("contatos")) || [];
-    contatos.push(contatoRestaurado);
-
-    localStorage.setItem("contatos", JSON.stringify(contatos));
-    localStorage.setItem("lixeira", JSON.stringify(lixeira));
-
-    carregarContatos();
-
-    // Atualiza visual da lixeira
-    btnVerLixeira.click();
-  }
-});
+ function animateFirefly(firefly) {
+   const deltaX = (Math.random() - 0.5) * 100;
+   const deltaY = (Math.random() - 0.5) * 100;
+   const duration = 4000 + Math.random() * 3000;
+   firefly.animate([
+     { transform: 'translate(0, 0)' },
+     { transform: `translate(${deltaX}px, ${deltaY}px)` }
+   ], {
+     duration,
+     iterations: Infinity,
+     direction: 'alternate',
+     easing: 'ease-in-out'
+   });
+ }
